@@ -1,0 +1,33 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "Mindstream backend - handles AssemblyAI STT, theme analysis, blockchain logging",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "build": "echo 'Backend build complete'"
+  },
+  "dependencies": {
+    "@assemblyai/node-realtime-transcriber": "^0.1.0",
+    "axios": "^1.6.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "ethers": "^5.7.2",
+    "express": "^4.18.2",
+    "node-fetch": "^2.7.0",
+    "socket.io": "^4.6.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
+  },
+  "keywords": [
+    "assemblyai",
+    "livepeer",
+    "blockchain",
+    "websocket"
+  ],
+  "author": "",
+  "license": "MIT"
+}
