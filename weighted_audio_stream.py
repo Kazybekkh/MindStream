@@ -157,6 +157,8 @@ class WeightedStreamClient:
         self.tracker = KeywordMomentumTracker()
         self.last_printed: Tuple[str, ...] | None = None
         self.refresh_interval = 5.0
+        self.pending_text = ""
+        self.latest_sentence_summary = ""
 
     def start(self):
         if not API_KEY:
@@ -254,6 +256,7 @@ class WeightedStreamClient:
             return
 
         self.tracker.ingest(transcript)
+        self._ingest_sentence(transcript)
 
     def _on_error(self, _ws, error):
         print(f"WebSocket error: {error}")
@@ -287,7 +290,7 @@ class WeightedStreamClient:
             snapshot = tuple(f"({word}, {weight:.2f})" for word, weight in keywords)
             if snapshot and snapshot != self.last_printed:
                 self.last_printed = snapshot
-                phrase = self._keywords_to_phrase(keywords)
+                phrase = self.latest_sentence_summary or self._keywords_to_phrase(keywords)
                 if phrase:
                     print(f"[summary] {phrase}")
                 formatted = ", ".join(snapshot)
@@ -297,6 +300,42 @@ class WeightedStreamClient:
                 self.last_printed = ()
                 print("[keywords] (listening)")
             self.stop_event.wait(self.refresh_interval)
+
+    def _ingest_sentence(self, text: str):
+        fragment = text.strip()
+        if not fragment:
+            return
+        if self.pending_text:
+            self.pending_text += " "
+        self.pending_text += fragment
+
+        sentences = re.split(r"(?<=[.!?])\s+", self.pending_text)
+        if len(sentences) <= 1:
+            return
+
+        # keep last unfinished fragment
+        self.pending_text = sentences[-1]
+        for sentence in sentences[:-1]:
+            summary = self._sentence_summary(sentence)
+            if summary:
+                self.latest_sentence_summary = summary
+
+    def _sentence_summary(self, sentence: str) -> str:
+        words = []
+        for token in KeywordMomentumTracker.WORD_PATTERN.findall(sentence.lower()):
+            if len(token) <= 2 or token in STOPWORDS:
+                continue
+            if token not in words:
+                words.append(token)
+            if len(words) == 6:
+                break
+        if not words:
+            return ""
+        primary = " ".join(words[:3])
+        secondary = " ".join(words[3:6])
+        if secondary:
+            return f"{primary}. {secondary}"
+        return primary
 
     @staticmethod
     def _keywords_to_phrase(keywords: Tuple[Tuple[str, float], ...]) -> str:

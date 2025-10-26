@@ -1,16 +1,24 @@
 # Mindstream
 
-Mindstream is an interactive Livepeer Daydream controller that listens to your speech, extracts the dominant theme with a decaying relevance model, pushes new prompts to Livepeer in real time, and immutably logs each transition on Base Sepolia for Envio to index.
+Mindstream is a real-time Livepeer Daydream console that listens to your mic, extracts the key idea from your speech, summarizes it locally with a small language model, and continuously re-prompts the Daydream stream so the visuals mirror your conversation.
 
-## What’s inside
+## TL;DR
 
-- Python utilities:
-- `weighted_audio_stream.py` – streams mic audio to AssemblyAI, keeps a decaying keyword queue, and prints the most relevant subjects every five seconds.
-- `daydream_prompt_bridge.py` – hooks the same queue into Livepeer Daydream, PATCHing prompts with the latest `(keyword, weight)` pairs.
-- `slm_daydream_bridge.py` + `local_summarizer.py` – capture transcripts, summarize them locally with a DistilBART model, and feed that sentence directly into Daydream.
-- `facial_emotion_detector.py` – currently stubbed out to keep dependencies light.
-- `daydream_api.py` – helper for calling the Daydream REST endpoint.
-- `contracts` – `MindstreamThemeLogger.sol`, plus deployment docs for logging prompt transitions on Base Sepolia.
+- AssemblyAI realtime STT streams your voice.
+- A decaying keyword tracker + sentence buffer keeps track of what you just said.
+- A distilled HuggingFace model (`local_summarizer.py`) produces micro-sentences (≈2 × 5 words).
+- The Daydream bridge pushes those prompts to Livepeer via the REST API.
+- Optional: record the evolution on-chain with `MindstreamThemeLogger.sol`.
+
+## Repo structure
+
+- `weighted_audio_stream.py` – mic capture + AssemblyAI client + sentence-aware keyword tracker.
+- `daydream_prompt_bridge.py` – pipes keyword snapshots into the Daydream REST API.
+- `slm_daydream_bridge.py` / `local_summarizer.py` – run the on-device summarizer loop and drive Daydream with short sentences.
+- `frontend/` – static dashboard (status badge, live camera vs. Daydream output, stream metadata, activity log).
+- `daydream_api.py` – helpers for keyword or free-form prompt updates.
+- `contracts/` – `MindstreamThemeLogger.sol` + deployment guide for Base Sepolia + Envio indexing.
+- `facial_emotion_detector.py` – placeholder (disabled to keep deps light).
 
 ## Quick start
 
@@ -29,27 +37,37 @@ python daydream_prompt_bridge.py
 python slm_daydream_bridge.py
 ```
 
-## Environment configuration
+Frontend preview:
+```bash
+cd frontend
+npx serve .
+# visit the printed localhost URL
+```
 
-Set the following environment variables before running the scripts:
+## Environment
 
-- `ASSEMBLYAI_API_KEY` – used by the weighted stream to mint STT tokens.
-- `DAYDREAM_API_KEY` and `DAYDREAM_STREAM_ID` – required by `daydream_prompt_bridge.py` / `daydream_api.py`.
-- `DAYDREAM_MODEL_ID`, `DAYDREAM_STYLE` (optional) – customize the generated prompt aesthetic.
-- `SLM_MODEL_ID` (optional) – override the default `sshleifer/distilbart-cnn-12-6` model used by the local summarizer.
+Set these variables (shell or `.env`):
 
-## Feature flow
+- `ASSEMBLYAI_API_KEY` – realtime STT token.
+- `DAYDREAM_API_KEY`, `DAYDREAM_STREAM_ID` – Livepeer Daydream auth/stream.
+- `DAYDREAM_MODEL_ID`, `DAYDREAM_STYLE` (optional) – tweak Daydream aesthetics.
+- `SLM_MODEL_ID` (optional) – override the summarizer model (`sshleifer/distilbart-cnn-12-6` by default).
 
-1. **Capture** – `weighted_audio_stream.py` captures audio locally, forwards it to AssemblyAI, and maintains a decaying relevance queue of keywords.
-2. **Prompting** – `daydream_prompt_bridge.py` converts the current keywords into the Daydream prompt format and PATCHes the live stream.
-3. **On-chain logging (optional)** – `contracts/MindstreamThemeLogger.sol` records prompt transitions so Envio HyperIndex can surface a historical timeline.
+## Flow
+
+1. **Capture:** `weighted_audio_stream.py` opens the mic, streams PCM chunks to AssemblyAI, decays keyword weights, and builds sentence fragments.
+2. **Summarize:** Every ~8 seconds, `slm_daydream_bridge.py` concatenates recent transcripts and feeds them through the local DistilBART model to get two punchy clauses.
+3. **Prompt:** `daydream_api.py` PATCHes the Daydream stream with those summaries (or keyword phrases as fallback).
+4. **Visualize:** The frontend shows raw webcam vs. Daydream output, plus metadata (stream ID, playback link, logs).
+5. **Persist (optional):** `MindstreamThemeLogger.sol` emits `ThemeLogged` events that Envio can index for history playback.
 
 ## Testing & linting
 
-- Python utilities: `source .venv/bin/activate` then run `python weighted_audio_stream.py` or `python daydream_prompt_bridge.py`. (Facial emotion detection is currently disabled to keep dependencies lean.)
+- Python utilities: `source .venv/bin/activate && python weighted_audio_stream.py` (or whichever bridge you want to test).
+- Frontend: static HTML/CSS/JS; lint manually or with your preferred tools.
 
 ## Next steps
 
-- Reintroduce the frontend/backend stacks once ready to ship a full-stack demo.
-- Build an Envio subgraph to hydrate history panels directly from `MindstreamThemeLogger`.
-- Expand the Daydream prompt bridge with richer style presets, motion controls, or Envio-powered context.
+- Swap in richer summarizer models (Flan-T5, LLaMA adapters) or plug in sentence embedding filters.
+- Extend the frontend with prompt history, style presets, and on-chain timeline playback.
+- Build the Envio HyperIndex integration to display the `ThemeLogged` ledger inside the console.
