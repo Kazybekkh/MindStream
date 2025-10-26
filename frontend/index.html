@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Daydream Live Stream</title>
+    <script src="./daydream.js"></script>
+    <style>
+        body {
+        background: #0b0b0b;
+        color: #fff;
+        font-family: system-ui, sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 1rem;
+        }
+        #videos {
+        display: flex;
+        justify-content: center;
+        gap: 1rem;
+        margin-top: 1rem;
+        flex-wrap: wrap;
+        }
+        video, iframe {
+        width: 480px;
+        height: 270px;
+        background: #111;
+        border-radius: 8px;
+        object-fit: cover;
+        }
+        button {
+        margin: 0.5rem;
+        padding: 0.6rem 1.2rem;
+        font-size: 1rem;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        background: #2b6df2;
+        color: #fff;
+        }
+        button:disabled {
+        background: #555;
+        cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎥 Livepeer / Daydream Stream</h1>
+    <div>
+        <input id="apiKey" placeholder="Enter Daydream API key" style="width: 320px; padding: 5px;" />
+        <button id="startBtn">Start Stream</button>
+        <button id="stopBtn" disabled>Stop</button>
+    </div>
+
+    <div id="videos">
+        <div>
+        <h3>Camera Input</h3>
+        <video id="inputVideo" autoplay playsinline muted></video>
+        </div>
+        <div>
+        <h3>Processed Output</h3>
+        <iframe id="outputVideo" allowfullscreen></iframe>
+        </div>
+    </div>
+
+    <script src="./main.js" defer></script>
+    </body>
+</html>
