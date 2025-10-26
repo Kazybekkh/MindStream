@@ -1,10 +1,12 @@
 """
 Weighted keyword streaming demo.
 
-This script mirrors `testaudio.py` by connecting to AssemblyAI's streaming API,
-but instead of printing every transcript chunk it keeps a decaying queue of the
-most relevant keywords being spoken and only emits those.
+Connects to AssemblyAI's realtime endpoint, ingests microphone audio, and
+maintains a decaying queue of dominant keywords. External callbacks can use the
+keyword vector (e.g., to steer Livepeer Daydream) or the raw transcript text.
 """
+
+from __future__ import annotations
 
 import json
 import os
@@ -13,13 +15,12 @@ import threading
 import time
 from collections import deque
 from datetime import datetime
-from typing import Deque, Dict, List, Tuple
+from typing import Callable, Deque, Dict, List, Optional, Tuple
 from urllib.parse import urlencode
 
 import pyaudio
 import websocket
 from dotenv import find_dotenv, load_dotenv
-import requests
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -35,7 +36,7 @@ CHANNELS = 1
 FORMAT = pyaudio.paInt16
 
 load_dotenv(find_dotenv())
-API_KEY = os.getenv("API_KEY")
+API_KEY = os.getenv("ASSEMBLYAI_API_KEY") or os.getenv("API_KEY")
 
 # ---------------------------------------------------------------------------
 # Keyword momentum tracker
@@ -76,8 +77,7 @@ STOPWORDS = {
 
 class KeywordMomentumTracker:
     """
-    Maintains a weighted queue of keywords with exponential decay so the UI
-    focuses on the most recent, most repeated ideas instead of raw transcript text.
+    Maintains a weighted queue of keywords with exponential decay.
     """
 
     WORD_PATTERN = re.compile(r"[a-zA-Z0-9']+")
@@ -90,7 +90,7 @@ class KeywordMomentumTracker:
         self.last_timestamp = time.time()
         self.last_emitted: Deque[Tuple[str, float]] = deque()
 
-    def ingest(self, text: str, now: float | None = None) -> Deque[Tuple[str, float]]:
+    def ingest(self, text: str, now: Optional[float] = None) -> Deque[Tuple[str, float]]:
         if not text:
             return self.last_emitted
 
@@ -108,7 +108,7 @@ class KeywordMomentumTracker:
         if elapsed <= 0:
             return
 
-        decay_factor = 0.1 ** (elapsed / self.halflife)
+        decay_factor = 0.5 ** (elapsed / self.halflife)
         stale_keys = []
         for word, weight in self.weights.items():
             decayed = weight * decay_factor
@@ -125,15 +125,12 @@ class KeywordMomentumTracker:
     def _tokenize(self, text: str) -> List[str]:
         tokens = []
         for match in self.WORD_PATTERN.findall(text.lower()):
-            if len(match) < 3 or match in STOPWORDS:
+            if len(match) <= 2 or match in STOPWORDS:
                 continue
             tokens.append(match)
         return tokens
 
     def current_keywords(self) -> Deque[Tuple[str, float]]:
-        """
-        Returns the latest ordered keywords without mutating internal weights.
-        """
         if not self.last_emitted:
             self.last_emitted = self._top_keywords()
         return self.last_emitted
@@ -146,8 +143,15 @@ class KeywordMomentumTracker:
 # Streaming client
 # ---------------------------------------------------------------------------
 
+
 class WeightedStreamClient:
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        on_keywords: Optional[Callable[[Tuple[Tuple[str, float], ...]], None]] = None,
+        on_transcript: Optional[Callable[[str], None]] = None,
+        refresh_interval: float = 5.0,
+    ):
         self.audio = None
         self.stream = None
         self.ws_app = None
@@ -156,11 +160,13 @@ class WeightedStreamClient:
         self.stop_event = threading.Event()
         self.tracker = KeywordMomentumTracker()
         self.last_printed: Tuple[str, ...] | None = None
-        self.refresh_interval = 5.0
+        self.refresh_interval = refresh_interval
+        self.keyword_callback = on_keywords
+        self.transcript_callback = on_transcript
 
     def start(self):
         if not API_KEY:
-            raise RuntimeError("API_KEY missing. Please set it in your environment.")
+            raise RuntimeError("ASSEMBLYAI_API_KEY missing. Please set it in your environment.")
 
         self.audio = pyaudio.PyAudio()
         try:
@@ -186,8 +192,7 @@ class WeightedStreamClient:
             on_close=self._on_close,
         )
 
-        ws_thread = threading.Thread(target=self.ws_app.run_forever, name="assemblyai-ws")
-        ws_thread.daemon = True
+        ws_thread = threading.Thread(target=self.ws_app.run_forever, name="assemblyai-ws", daemon=True)
         ws_thread.start()
 
         self.refresh_thread = threading.Thread(target=self._emit_loop, name="keyword-refresh", daemon=True)
@@ -241,9 +246,7 @@ class WeightedStreamClient:
         if msg_type == "Begin":
             session_id = payload.get("id")
             expires_at = payload.get("expires_at")
-            print(
-                f"Session started ({session_id}), expires at {datetime.fromtimestamp(expires_at)}."
-            )
+            print(f"Session started ({session_id}), expires at {datetime.fromtimestamp(expires_at)}.")
             return
 
         if msg_type != "Turn":
@@ -254,6 +257,11 @@ class WeightedStreamClient:
             return
 
         self.tracker.ingest(transcript)
+        if self.transcript_callback:
+            try:
+                self.transcript_callback(transcript.strip())
+            except Exception as exc:  # noqa: BLE001
+                print(f"[transcript callback] error: {exc}")
 
     def _on_error(self, _ws, error):
         print(f"WebSocket error: {error}")
@@ -283,37 +291,21 @@ class WeightedStreamClient:
 
     def _emit_loop(self):
         while not self.stop_event.is_set():
-            snapshot = tuple(f"({word}, {weight:.2f})" for word, weight in self.tracker.current_keywords())
+            keywords = tuple(self.tracker.current_keywords())
+            snapshot = tuple(f"({word}, {weight:.2f})" for word, weight in keywords)
             if snapshot and snapshot != self.last_printed:
                 self.last_printed = snapshot
-                formatted = ", ".join(snapshot)
-                print(f"[keywords] {formatted}")
-                update_prompt(stream_id, auth_key, formatted)
-                # print(len(formatted))
+                print(f"[keywords] {', '.join(snapshot)}")
+                if self.keyword_callback:
+                    try:
+                        self.keyword_callback(keywords)
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"[keyword callback] error: {exc}")
             elif not snapshot and self.last_printed:
                 self.last_printed = ()
                 print("[keywords] (listening)")
             self.stop_event.wait(self.refresh_interval)
 
-def update_prompt(stream_id: str, auth_key: str, prompt: str) -> None:
-
-    url = f"https://api.daydream.live/v1/streams/{stream_id}"
-
-    payload = {
-        "params": {
-            # "prompt": [[keyword, weight] for keyword, weight in list(prompt.items())]
-            "prompt": prompt
-        }
-    }
-    headers = {
-        "Authorization": f"Bearer {auth_key}",
-        "Content-Type": "application/json"
-    }
-
-    response = requests.patch(url, json=payload, headers=headers)
-
-stream_id = os.getenv("DAYDREAM_STREAM_ID")
-auth_key = os.getenv("DAYDREAM_API_ID")
 
 if __name__ == "__main__":
     WeightedStreamClient().start()
