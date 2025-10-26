@@ -55,7 +55,11 @@ async function startStream() {
 
     await api.setupWebRTC(canvas);
     console.log('🎉 WebRTC streaming established!');
-    console.log("TEST", await api.getStreamStatus())
+
+    const status = await api.getStreamStatus()
+    const stream_id = status.id
+    console.log("stream_id:", stream_id)
+    fetch(`/set_stream_id?stream_id=${stream_id}`)
     } catch (err) {
     console.error('Stream start failed:', err);
     alert('Error: ' + err.message);

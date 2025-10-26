@@ -147,7 +147,7 @@ class KeywordMomentumTracker:
 # ---------------------------------------------------------------------------
 
 class WeightedStreamClient:
-    def __init__(self):
+    def __init__(self, stream_id_getter, auth_key):
         self.audio = None
         self.stream = None
         self.ws_app = None
@@ -157,6 +157,8 @@ class WeightedStreamClient:
         self.tracker = KeywordMomentumTracker()
         self.last_printed: Tuple[str, ...] | None = None
         self.refresh_interval = 5.0
+        self.stream_id_getter = stream_id_getter
+        self.auth_key = auth_key
 
     def start(self):
         if not API_KEY:
@@ -288,14 +290,17 @@ class WeightedStreamClient:
                 self.last_printed = snapshot
                 formatted = ", ".join(snapshot)
                 print(f"[keywords] {formatted}")
-                update_prompt(stream_id, auth_key, formatted)
-                # print(len(formatted))
+                update_prompt(self.stream_id_getter(), self.auth_key, formatted)
+
             elif not snapshot and self.last_printed:
                 self.last_printed = ()
                 print("[keywords] (listening)")
             self.stop_event.wait(self.refresh_interval)
 
 def update_prompt(stream_id: str, auth_key: str, prompt: str) -> None:
+    if stream_id is None:
+        print("No stream_id set yet")
+        return
 
     url = f"https://api.daydream.live/v1/streams/{stream_id}"
 
@@ -312,8 +317,8 @@ def update_prompt(stream_id: str, auth_key: str, prompt: str) -> None:
 
     response = requests.patch(url, json=payload, headers=headers)
 
-stream_id = os.getenv("DAYDREAM_STREAM_ID")
-auth_key = os.getenv("DAYDREAM_API_ID")
-
 if __name__ == "__main__":
-    WeightedStreamClient().start()
+    WeightedStreamClient(
+        stream_id_getter= lambda: os.getenv("DAYDREAM_STREAM_ID"),
+        auth_key = os.getenv("DAYDREAM_API_ID")
+    ).start()
