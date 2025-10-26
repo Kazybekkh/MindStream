@@ -147,7 +147,7 @@ class KeywordMomentumTracker:
 # ---------------------------------------------------------------------------
 
 class WeightedStreamClient:
-    def __init__(self):
+    def __init__(self, get_stream_id):
         self.audio = None
         self.stream = None
         self.ws_app = None
@@ -157,6 +157,7 @@ class WeightedStreamClient:
         self.tracker = KeywordMomentumTracker()
         self.last_printed: Tuple[str, ...] | None = None
         self.refresh_interval = 5.0
+        self.get_stream_id = get_stream_id
 
     def start(self):
         if not API_KEY:
@@ -292,7 +293,7 @@ class WeightedStreamClient:
                     print(f"[summary] {phrase}")
                 formatted = ", ".join(snapshot)
                 print(f"[keywords] {formatted}")
-                update_prompt(stream_id, auth_key, phrase or formatted)
+                update_prompt(self.get_stream_id(), auth_key, phrase or formatted)
             elif not snapshot and self.last_printed:
                 self.last_printed = ()
                 print("[keywords] (listening)")
@@ -329,8 +330,8 @@ def update_prompt(stream_id: str, auth_key: str, prompt: str) -> None:
 
     response = requests.patch(url, json=payload, headers=headers)
 
-stream_id = os.getenv("DAYDREAM_STREAM_ID")
+# stream_id = os.getenv("DAYDREAM_STREAM_ID")
 auth_key = os.getenv("DAYDREAM_API_ID")
 
-if __name__ == "__main__":
-    WeightedStreamClient().start()
+# if __name__ == "__main__":
+#     WeightedStreamClient().start()

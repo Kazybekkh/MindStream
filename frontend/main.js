@@ -96,6 +96,9 @@ async function startStream() {
 
     await api.setupWebRTC(canvas);
     logEvent("WebRTC handshake completed");
+    const stream_id = (await api.getStreamStatus()).id
+    fetch(`/set_stream_id?stream_id=${stream_id}`)
+    console.log(stream_id)
   } catch (error) {
     console.error(error);
     alert(error.message);
