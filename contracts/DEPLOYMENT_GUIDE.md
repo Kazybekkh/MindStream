@@ -1,144 +1,49 @@
-# Smart Contract Deployment Guide
+# MindstreamThemeLogger Deployment Cheat Sheet
 
-## MindstreamThemeLogger Contract
+## 1. Prerequisites
 
-This contract logs theme shifts on Base Sepolia blockchain for indexing by Envio.
+- Node.js LTS and pnpm (already configured in the repo)
+- Foundry or Hardhat. Commands below assume `forge` but you can port them to Hardhat easily.
+- Base Sepolia RPC endpoint (Alchemy, Ankr, or Blast) and funded deployer key. Remember to also fund the same account with BaseSepolia ETH from [the official faucet](https://www.coinbase.com/faucets/base-ethereum-goerli-faucet).
+- Wallet private key stored in `packages/backend/.env` as `WALLET_PRIVATE_KEY`.
 
-### Quick Deploy with Remix
-
-1. **Open Remix IDE**: https://remix.ethereum.org/
-
-2. **Create new file**: `MindstreamThemeLogger.sol`
-
-3. **Copy contract code** from `contracts/MindstreamThemeLogger.sol`
-
-4. **Compile**:
-   - Select Solidity compiler version: `0.8.20+`
-   - Click "Compile"
-
-5. **Deploy**:
-   - Go to "Deploy & Run Transactions"
-   - Select Environment: "Injected Provider - MetaMask"
-   - Make sure MetaMask is on **Base Sepolia** network
-   - Click "Deploy"
-   - Confirm transaction in MetaMask
-
-6. **Save contract address**: Copy the deployed contract address
-
-7. **Update backend**:
-   ```bash
-   # Edit packages/backend/.env
-   CONTRACT_ADDRESS=0x... # paste your contract address
-   ```
-
-### Deploy with Hardhat (Alternative)
+## 2. Compile + Test Locally
 
 ```bash
-# Install Hardhat
-cd MindStream
-pnpm add -D hardhat @nomicfoundation/hardhat-toolbox
-
-# Initialize Hardhat
-npx hardhat init
-
-# Follow prompts, select "Create a JavaScript project"
-
-# Deploy script (create scripts/deploy.js):
-# See hardhat-deploy-example.js below
+forge build
+forge test
 ```
 
-### Verify on BaseScan
+If you are using Hardhat instead, run `pnpm hardhat compile`.
 
-After deployment, verify your contract:
+## 3. Deploy to Base Sepolia
 
-1. Go to: https://sepolia.basescan.org/
-2. Search for your contract address
-3. Click "Contract" → "Verify and Publish"
-4. Upload source code or use Hardhat verification
-
-### Get Contract ABI
-
-After compilation in Remix:
-1. Go to "Solidity Compiler" tab
-2. Click "ABI" button (copy icon)
-3. Save to `packages/backend/src/contractABI.json`
-
-Or if using Hardhat:
 ```bash
-# ABI is in: artifacts/contracts/MindstreamThemeLogger.sol/MindstreamThemeLogger.json
+forge create \
+  --rpc-url $BASE_SEPOLIA_RPC_URL \
+  --private-key $WALLET_PRIVATE_KEY \
+  contracts/MindstreamThemeLogger.sol:MindstreamThemeLogger
 ```
 
-### Update Backend Integration
+Copy the deployed address into `packages/backend/.env` as `MINDSTREAM_CONTRACT_ADDRESS`.
 
-In `packages/backend/src/blockchainService.js`:
+## 4. Verify the Contract
 
-```javascript
-import contractABI from './contractABI.json' assert { type: 'json' };
-
-// In initialize() method:
-if (process.env.CONTRACT_ADDRESS) {
-  this.contract = new ethers.Contract(
-    process.env.CONTRACT_ADDRESS,
-    contractABI,
-    this.wallet
-  );
-}
+```bash
+forge verify-contract \
+  --watch \
+  --rpc-url $BASE_SEPOLIA_RPC_URL \
+  --verifier blockscout \
+  --verifier-url https://base-sepolia.blockscout.com/api \
+  <DEPLOYED_ADDRESS> \
+  MindstreamThemeLogger
 ```
 
-### Test the Contract
+## 5. Envio Indexing
 
-```javascript
-// Test in Node.js or browser console
-const sessionId = 'test-session-' + Date.now();
-const theme = 'nature';
-const prompt = 'A lush forest with natural lighting';
+1. Install the Envio CLI globally: `npm i -g @envio-dev/cli`.
+2. Initialize a workspace: `envio init mindstream-indexer`.
+3. Point the data source to the deployed contract and import the `ThemeLogged` event.
+4. Expose the resulting GraphQL endpoint for the frontend (`graphql-request` is already installed).
 
-const tx = await contract.logThemeShift(sessionId, theme, prompt);
-await tx.wait();
-console.log('Theme shift logged!');
-
-// Query history
-const history = await contract.getSessionHistory(sessionId);
-console.log('Session history:', history);
-```
-
-### Contract Events (for Envio)
-
-The contract emits these events:
-- `ThemeShiftLogged`: Main event for theme changes
-- `SessionStarted`: When a new session begins
-
-Envio will index these events for fast GraphQL queries.
-
-### Base Sepolia Network Info
-
-- **Chain ID**: 84532
-- **RPC URL**: https://sepolia.base.org
-- **Block Explorer**: https://sepolia.basescan.org
-- **Faucet**: https://www.coinbase.com/faucets/base-ethereum-sepolia-faucet
-
-### Estimated Gas Costs
-
-- Deploy: ~0.001-0.002 ETH (test ETH)
-- logThemeShift: ~0.0001 ETH per call
-- Read operations: Free (view functions)
-
-### Security Notes
-
-- ✅ No funds stored in contract
-- ✅ Only emits events and stores data
-- ✅ No owner privileges needed
-- ✅ Anyone can log theme shifts
-- ⚠️ Consider adding access control for production
-
-### Next Steps
-
-After deployment:
-1. Save contract address to `.env`
-2. Save ABI to `contractABI.json`
-3. Set up Envio indexer (Phase 4)
-4. Test end-to-end flow
-
----
-
-Ready for Phase 2! 🚀
+That’s it—once the contract emits events you can hydrate the UI or automate leaderboards directly from Envio’s HyperIndex.

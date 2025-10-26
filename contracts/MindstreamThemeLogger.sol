@@ -1,121 +1,56 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.24;
 
 /**
  * @title MindstreamThemeLogger
- * @dev Logs theme shifts from user sessions immutably on Base Sepolia
- * @notice This contract is designed for the Envio indexing track
+ * @notice Stores the evolving AI prompt history for each performer and emits
+ *         events that the Envio indexer can follow in real time.
  */
 contract MindstreamThemeLogger {
-    struct ThemeShift {
+    struct ThemeEntry {
+        address participant;
         uint256 timestamp;
-        string sessionId;
         string theme;
         string prompt;
-        address user;
+        string[] keywords;
     }
 
-    // Mapping: sessionId => array of theme shifts
-    mapping(string => ThemeShift[]) private sessionHistory;
-    
-    // Array of all session IDs for enumeration
-    string[] private allSessions;
-    
-    // Mapping to check if session exists
-    mapping(string => bool) private sessionExists;
+    ThemeEntry[] private entries;
 
-    // Events for Envio indexer
-    event ThemeShiftLogged(
-        string indexed sessionId,
-        uint256 indexed timestamp,
-        string theme,
-        string prompt,
-        address indexed user
-    );
-
-    event SessionStarted(
-        string indexed sessionId,
-        uint256 timestamp,
-        address indexed user
-    );
+    event ThemeLogged(address indexed participant, uint256 indexed entryId, string theme, string prompt);
 
     /**
-     * @dev Log a new theme shift for a session
-     * @param sessionId Unique identifier for the session
-     * @param theme The detected theme (e.g., "nature", "technology")
-     * @param prompt The generated visual prompt for Livepeer
+     * @notice Record a new theme into the immutable log.
+     * @param theme         The dominant keyword detected by the analyzer.
+     * @param prompt        The text prompt that Mindstream forwarded to Livepeer.
+     * @param keywords      Additional supporting keywords in order of weight.
+     * @return entryId      The numeric id of the stored entry.
      */
-    function logThemeShift(
-        string memory sessionId,
-        string memory theme,
-        string memory prompt
-    ) external {
-        // Create new session if it doesn't exist
-        if (!sessionExists[sessionId]) {
-            sessionExists[sessionId] = true;
-            allSessions.push(sessionId);
-            emit SessionStarted(sessionId, block.timestamp, msg.sender);
-        }
-
-        // Create and store theme shift
-        ThemeShift memory shift = ThemeShift({
+    function recordTheme(
+        string calldata theme,
+        string calldata prompt,
+        string[] calldata keywords
+    ) external returns (uint256 entryId) {
+        ThemeEntry memory entry = ThemeEntry({
+            participant: msg.sender,
             timestamp: block.timestamp,
-            sessionId: sessionId,
             theme: theme,
             prompt: prompt,
-            user: msg.sender
+            keywords: keywords
         });
 
-        sessionHistory[sessionId].push(shift);
+        entries.push(entry);
+        entryId = entries.length - 1;
 
-        emit ThemeShiftLogged(
-            sessionId,
-            block.timestamp,
-            theme,
-            prompt,
-            msg.sender
-        );
+        emit ThemeLogged(msg.sender, entryId, theme, prompt);
     }
 
-    /**
-     * @dev Get all theme shifts for a specific session
-     * @param sessionId The session to query
-     * @return Array of theme shifts
-     */
-    function getSessionHistory(string memory sessionId) 
-        external 
-        view 
-        returns (ThemeShift[] memory) 
-    {
-        return sessionHistory[sessionId];
+    function totalEntries() external view returns (uint256) {
+        return entries.length;
     }
 
-    /**
-     * @dev Get the number of theme shifts in a session
-     * @param sessionId The session to query
-     * @return Number of shifts
-     */
-    function getSessionShiftCount(string memory sessionId) 
-        external 
-        view 
-        returns (uint256) 
-    {
-        return sessionHistory[sessionId].length;
-    }
-
-    /**
-     * @dev Get all session IDs
-     * @return Array of all session IDs
-     */
-    function getAllSessions() external view returns (string[] memory) {
-        return allSessions;
-    }
-
-    /**
-     * @dev Get the total number of sessions
-     * @return Number of sessions
-     */
-    function getTotalSessions() external view returns (uint256) {
-        return allSessions.length;
+    function getEntry(uint256 entryId) external view returns (ThemeEntry memory) {
+        require(entryId < entries.length, "entry not found");
+        return entries[entryId];
     }
 }
