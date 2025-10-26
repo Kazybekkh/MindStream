@@ -5,9 +5,10 @@ Mindstream is an interactive Livepeer Daydream controller that listens to your s
 ## What’s inside
 
 - Python utilities:
-  - `weighted_audio_stream.py` – streams mic audio to AssemblyAI, keeps a decaying keyword queue, and prints the most relevant subjects every five seconds.
-  - `daydream_prompt_bridge.py` – hooks the same queue into Livepeer Daydream, PATCHing prompts with the latest `(keyword, weight)` pairs.
-  - `facial_emotion_detector.py` – currently stubbed out to keep dependencies light.
+- `weighted_audio_stream.py` – streams mic audio to AssemblyAI, keeps a decaying keyword queue, and prints the most relevant subjects every five seconds.
+- `daydream_prompt_bridge.py` – hooks the same queue into Livepeer Daydream, PATCHing prompts with the latest `(keyword, weight)` pairs.
+- `slm_daydream_bridge.py` + `local_summarizer.py` – capture transcripts, summarize them locally with a DistilBART model, and feed that sentence directly into Daydream.
+- `facial_emotion_detector.py` – currently stubbed out to keep dependencies light.
 - `daydream_api.py` – helper for calling the Daydream REST endpoint.
 - `contracts` – `MindstreamThemeLogger.sol`, plus deployment docs for logging prompt transitions on Base Sepolia.
 
@@ -18,11 +19,14 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r python-requirements.txt
 
-# run the keyword tracker
+# keyword tracker only
 python weighted_audio_stream.py
 
-# or stream keywords directly to Daydream
+# keywords -> Daydream
 python daydream_prompt_bridge.py
+
+# local SLM summary -> Daydream
+python slm_daydream_bridge.py
 ```
 
 ## Environment configuration
@@ -32,6 +36,7 @@ Set the following environment variables before running the scripts:
 - `ASSEMBLYAI_API_KEY` – used by the weighted stream to mint STT tokens.
 - `DAYDREAM_API_KEY` and `DAYDREAM_STREAM_ID` – required by `daydream_prompt_bridge.py` / `daydream_api.py`.
 - `DAYDREAM_MODEL_ID`, `DAYDREAM_STYLE` (optional) – customize the generated prompt aesthetic.
+- `SLM_MODEL_ID` (optional) – override the default `sshleifer/distilbart-cnn-12-6` model used by the local summarizer.
 
 ## Feature flow
 

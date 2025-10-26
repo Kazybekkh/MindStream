@@ -283,17 +283,34 @@ class WeightedStreamClient:
 
     def _emit_loop(self):
         while not self.stop_event.is_set():
-            snapshot = tuple(f"({word}, {weight:.2f})" for word, weight in self.tracker.current_keywords())
+            keywords = tuple(self.tracker.current_keywords())
+            snapshot = tuple(f"({word}, {weight:.2f})" for word, weight in keywords)
             if snapshot and snapshot != self.last_printed:
                 self.last_printed = snapshot
+                phrase = self._keywords_to_phrase(keywords)
+                if phrase:
+                    print(f"[summary] {phrase}")
                 formatted = ", ".join(snapshot)
                 print(f"[keywords] {formatted}")
-                update_prompt(stream_id, auth_key, formatted)
-                # print(len(formatted))
+                update_prompt(stream_id, auth_key, phrase or formatted)
             elif not snapshot and self.last_printed:
                 self.last_printed = ()
                 print("[keywords] (listening)")
             self.stop_event.wait(self.refresh_interval)
+
+    @staticmethod
+    def _keywords_to_phrase(keywords: Tuple[Tuple[str, float], ...]) -> str:
+        words = []
+        for word, _ in keywords:
+            if len(word) <= 3:
+                continue
+            if word not in words:
+                words.append(word)
+            if len(words) == 5:
+                break
+        if not words:
+            return ""
+        return " ".join(words).strip()
 
 def update_prompt(stream_id: str, auth_key: str, prompt: str) -> None:
 
