@@ -1,7 +1,8 @@
 # Mindstream
 
 Mindstream is an interactive Livepeer Daydream controller that listens to your speech, extracts the dominant theme with a decaying relevance model, pushes new prompts to Livepeer in real time, and immutably logs each transition on Base Sepolia for Envio to index.
-
+## Demo 
+[[https://www.youtube.com/watch?v=R5AhDbXoXCo]]
 ## What’s inside
 
 - Python utilities:
