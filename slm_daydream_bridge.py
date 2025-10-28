@@ -50,7 +50,7 @@ class SLMSummaryBridge:
                 update_prompt_text(summary, stream_id=self.stream_id, api_key=self.api_key)
                 self.last_prompt = summary
                 print(f"[slm] {summary}")
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 print(f"[slm] failed to update Daydream: {exc}")
 
 
@@ -65,7 +65,7 @@ def main():
     bridge = SLMSummaryBridge(stream_id=stream_id, api_key=api_key)
     bridge.start()
 
-    client = WeightedStreamClient()
+    client = WeightedStreamClient(on_transcript=bridge.ingest, enable_daydream_updates=False)
     try:
         client.start()
     finally:

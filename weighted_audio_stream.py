@@ -1,10 +1,12 @@
 """
 Weighted keyword streaming demo.
 
-This script mirrors `testaudio.py` by connecting to AssemblyAI's streaming API,
-but instead of printing every transcript chunk it keeps a decaying queue of the
-most relevant keywords being spoken and only emits those.
+Connects to AssemblyAI's realtime endpoint, ingests microphone audio, and
+maintains a decaying queue of dominant keywords. External callbacks can use the
+keyword vector (e.g., to steer Livepeer Daydream) or the raw transcript text.
 """
+
+from __future__ import annotations
 
 import json
 import os
@@ -19,7 +21,6 @@ from urllib.parse import urlencode
 import pyaudio
 import websocket
 from dotenv import find_dotenv, load_dotenv
-import requests
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -35,7 +36,7 @@ CHANNELS = 1
 FORMAT = pyaudio.paInt16
 
 load_dotenv(find_dotenv())
-API_KEY = os.getenv("API_KEY")
+API_KEY = os.getenv("ASSEMBLYAI_API_KEY") or os.getenv("API_KEY")
 DAYDREAM_STREAM_ID = os.getenv("DAYDREAM_STREAM_ID")
 DAYDREAM_API_KEY = os.getenv("DAYDREAM_API_KEY") or os.getenv("DAYDREAM_API_ID")
 
@@ -78,8 +79,7 @@ STOPWORDS = {
 
 class KeywordMomentumTracker:
     """
-    Maintains a weighted queue of keywords with exponential decay so the UI
-    focuses on the most recent, most repeated ideas instead of raw transcript text.
+    Maintains a weighted queue of keywords with exponential decay.
     """
 
     WORD_PATTERN = re.compile(r"[a-zA-Z0-9']+")
@@ -92,7 +92,7 @@ class KeywordMomentumTracker:
         self.last_timestamp = time.time()
         self.last_emitted: Deque[Tuple[str, float]] = deque()
 
-    def ingest(self, text: str, now: float | None = None) -> Deque[Tuple[str, float]]:
+    def ingest(self, text: str, now: Optional[float] = None) -> Deque[Tuple[str, float]]:
         if not text:
             return self.last_emitted
 
@@ -127,15 +127,12 @@ class KeywordMomentumTracker:
     def _tokenize(self, text: str) -> List[str]:
         tokens = []
         for match in self.WORD_PATTERN.findall(text.lower()):
-            if len(match) < 3 or match in STOPWORDS:
+            if len(match) <= 2 or match in STOPWORDS:
                 continue
             tokens.append(match)
         return tokens
 
     def current_keywords(self) -> Deque[Tuple[str, float]]:
-        """
-        Returns the latest ordered keywords without mutating internal weights.
-        """
         if not self.last_emitted:
             self.last_emitted = self._top_keywords()
         return self.last_emitted
@@ -148,8 +145,19 @@ class KeywordMomentumTracker:
 # Streaming client
 # ---------------------------------------------------------------------------
 
+
 class WeightedStreamClient:
-    def __init__(self, stream_id_provider: Optional[Callable[[], Optional[str]]] = None):
+    def __init__(
+        self,
+        *,
+        on_keywords: Optional[Callable[[Tuple[Tuple[str, float], ...]], None]] = None,
+        on_transcript: Optional[Callable[[str], None]] = None,
+        refresh_interval: float = 5.0,
+        stream_id_provider: Optional[Callable[[], Optional[str]]] = None,
+        daydream_api_key: Optional[str] = None,
+        default_stream_id: Optional[str] = None,
+        enable_daydream_updates: bool = True,
+    ):
         self.audio = None
         self.stream = None
         self.ws_app = None
@@ -158,19 +166,25 @@ class WeightedStreamClient:
         self.stop_event = threading.Event()
         self.tracker = KeywordMomentumTracker()
         self.last_printed: Tuple[str, ...] | None = None
-        self.refresh_interval = 5.0
+        self.refresh_interval = refresh_interval
+        self.keyword_callback = on_keywords
+        self.transcript_callback = on_transcript
+        self.stream_id_provider = stream_id_provider
+        self.default_stream_id = default_stream_id or DAYDREAM_STREAM_ID
+        self.daydream_key = daydream_api_key if daydream_api_key is not None else DAYDREAM_API_KEY
         self.pending_text = ""
         self.latest_sentence_summary = ""
-        self.stream_id_provider = stream_id_provider
-        self.default_stream_id = DAYDREAM_STREAM_ID
-        self.daydream_key = DAYDREAM_API_KEY
         self._missing_stream_warning_emitted = False
+        self.daydream_enabled = enable_daydream_updates
 
     def start(self):
         if not API_KEY:
             raise RuntimeError("API_KEY missing. Please set it in your environment.")
-        if not self.daydream_key:
-            raise RuntimeError("DAYDREAM_API_KEY missing. Please set it in your environment.")
+        if self.daydream_enabled and not self.daydream_key:
+            print("[daydream] disabling automatic updates: DAYDREAM_API_KEY missing.")
+            self.daydream_enabled = False
+        if not self.daydream_enabled:
+            self._missing_stream_warning_emitted = False
 
         self.audio = pyaudio.PyAudio()
         try:
@@ -196,8 +210,7 @@ class WeightedStreamClient:
             on_close=self._on_close,
         )
 
-        ws_thread = threading.Thread(target=self.ws_app.run_forever, name="assemblyai-ws")
-        ws_thread.daemon = True
+        ws_thread = threading.Thread(target=self.ws_app.run_forever, name="assemblyai-ws", daemon=True)
         ws_thread.start()
 
         self.refresh_thread = threading.Thread(target=self._emit_loop, name="keyword-refresh", daemon=True)
@@ -251,9 +264,7 @@ class WeightedStreamClient:
         if msg_type == "Begin":
             session_id = payload.get("id")
             expires_at = payload.get("expires_at")
-            print(
-                f"Session started ({session_id}), expires at {datetime.fromtimestamp(expires_at)}."
-            )
+            print(f"Session started ({session_id}), expires at {datetime.fromtimestamp(expires_at)}.")
             return
 
         if msg_type != "Turn":
@@ -264,6 +275,11 @@ class WeightedStreamClient:
             return
 
         self.tracker.ingest(transcript)
+        if self.transcript_callback:
+            try:
+                self.transcript_callback(transcript.strip())
+            except Exception as exc:  # noqa: BLE001
+                print(f"[transcript callback] error: {exc}")
         self._ingest_sentence(transcript)
 
     def _on_error(self, _ws, error):
@@ -298,19 +314,31 @@ class WeightedStreamClient:
             snapshot = tuple(f"({word}, {weight:.2f})" for word, weight in keywords)
             if snapshot and snapshot != self.last_printed:
                 self.last_printed = snapshot
-                phrase = self.latest_sentence_summary or self._keywords_to_phrase(keywords)
-                if phrase:
-                    print(f"[summary] {phrase}")
                 formatted = ", ".join(snapshot)
+                phrase: Optional[str] = None
+                if self.daydream_enabled:
+                    phrase = self.latest_sentence_summary or self._keywords_to_phrase(keywords)
+                    if phrase:
+                        print(f"[summary] {phrase}")
                 print(f"[keywords] {formatted}")
-                stream_id = self._resolve_stream_id()
-                if not stream_id:
-                    self.stop_event.wait(self.refresh_interval)
-                    continue
-                try:
-                    update_prompt(stream_id, self.daydream_key, phrase or formatted)
-                except requests.RequestException as exc:
-                    print(f"[daydream] failed to update stream: {exc}")
+                if self.keyword_callback:
+                    try:
+                        self.keyword_callback(keywords)
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"[keyword callback] error: {exc}")
+                if self.daydream_enabled:
+                    stream_id = self._resolve_stream_id()
+                    if not stream_id:
+                        self.stop_event.wait(self.refresh_interval)
+                        continue
+                    if not self.daydream_key:
+                        print("[daydream] unable to update stream: missing API key")
+                        self.daydream_enabled = False
+                    else:
+                        try:
+                            update_prompt(stream_id, self.daydream_key, phrase or formatted)
+                        except requests.RequestException as exc:
+                            print(f"[daydream] failed to update stream: {exc}")
             elif not snapshot and self.last_printed:
                 self.last_printed = ()
                 print("[keywords] (listening)")
@@ -318,6 +346,8 @@ class WeightedStreamClient:
         print("Keyword emitter stopped.")
 
     def _resolve_stream_id(self) -> Optional[str]:
+        if not self.daydream_enabled:
+            return None
         stream_id = self.stream_id_provider() if self.stream_id_provider else self.default_stream_id
         if stream_id:
             if self._missing_stream_warning_emitted:
@@ -399,3 +429,6 @@ def update_prompt(stream_id: str, auth_key: str, prompt: str) -> None:
 
     response = requests.patch(url, json=payload, headers=headers, timeout=10)
     response.raise_for_status()
+
+if __name__ == "__main__":
+    WeightedStreamClient().start()
