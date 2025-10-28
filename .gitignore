@@ -6,4 +6,3 @@ pnpm-lock.yaml
 packages/*/node_modules/
 packages/frontend/.next/
 packages/frontend/out/
-venv

@@ -57,7 +57,7 @@ class SLMSummaryBridge:
 def main():
     load_dotenv(find_dotenv())
     stream_id = os.getenv("DAYDREAM_STREAM_ID")
-    api_key = os.getenv("DAYDREAM_API_ID")
+    api_key = os.getenv("DAYDREAM_API_KEY")
 
     if not stream_id or not api_key:
         raise RuntimeError("DAYDREAM_STREAM_ID and DAYDREAM_API_KEY must be set.")

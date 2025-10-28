@@ -13,7 +13,7 @@ import threading
 import time
 from collections import deque
 from datetime import datetime
-from typing import Deque, Dict, List, Tuple
+from typing import Callable, Deque, Dict, List, Optional, Tuple
 from urllib.parse import urlencode
 
 import pyaudio
@@ -36,6 +36,8 @@ FORMAT = pyaudio.paInt16
 
 load_dotenv(find_dotenv())
 API_KEY = os.getenv("API_KEY")
+DAYDREAM_STREAM_ID = os.getenv("DAYDREAM_STREAM_ID")
+DAYDREAM_API_KEY = os.getenv("DAYDREAM_API_KEY") or os.getenv("DAYDREAM_API_ID")
 
 # ---------------------------------------------------------------------------
 # Keyword momentum tracker
@@ -147,7 +149,7 @@ class KeywordMomentumTracker:
 # ---------------------------------------------------------------------------
 
 class WeightedStreamClient:
-    def __init__(self):
+    def __init__(self, stream_id_provider: Optional[Callable[[], Optional[str]]] = None):
         self.audio = None
         self.stream = None
         self.ws_app = None
@@ -159,10 +161,16 @@ class WeightedStreamClient:
         self.refresh_interval = 5.0
         self.pending_text = ""
         self.latest_sentence_summary = ""
+        self.stream_id_provider = stream_id_provider
+        self.default_stream_id = DAYDREAM_STREAM_ID
+        self.daydream_key = DAYDREAM_API_KEY
+        self._missing_stream_warning_emitted = False
 
     def start(self):
         if not API_KEY:
             raise RuntimeError("API_KEY missing. Please set it in your environment.")
+        if not self.daydream_key:
+            raise RuntimeError("DAYDREAM_API_KEY missing. Please set it in your environment.")
 
         self.audio = pyaudio.PyAudio()
         try:
@@ -295,11 +303,31 @@ class WeightedStreamClient:
                     print(f"[summary] {phrase}")
                 formatted = ", ".join(snapshot)
                 print(f"[keywords] {formatted}")
-                update_prompt(stream_id, auth_key, phrase or formatted)
+                stream_id = self._resolve_stream_id()
+                if not stream_id:
+                    self.stop_event.wait(self.refresh_interval)
+                    continue
+                try:
+                    update_prompt(stream_id, self.daydream_key, phrase or formatted)
+                except requests.RequestException as exc:
+                    print(f"[daydream] failed to update stream: {exc}")
             elif not snapshot and self.last_printed:
                 self.last_printed = ()
                 print("[keywords] (listening)")
             self.stop_event.wait(self.refresh_interval)
+        print("Keyword emitter stopped.")
+
+    def _resolve_stream_id(self) -> Optional[str]:
+        stream_id = self.stream_id_provider() if self.stream_id_provider else self.default_stream_id
+        if stream_id:
+            if self._missing_stream_warning_emitted:
+                print(f"[daydream] using stream {stream_id}")
+                self._missing_stream_warning_emitted = False
+            return stream_id
+        if not self._missing_stream_warning_emitted:
+            print("[daydream] waiting for stream id from frontend...")
+            self._missing_stream_warning_emitted = True
+        return None
 
     def _ingest_sentence(self, text: str):
         fragment = text.strip()
@@ -352,7 +380,10 @@ class WeightedStreamClient:
         return " ".join(words).strip()
 
 def update_prompt(stream_id: str, auth_key: str, prompt: str) -> None:
-
+    if not stream_id:
+        raise ValueError("stream_id is required to update Daydream")
+    if not auth_key:
+        raise ValueError("Daydream API key missing")
     url = f"https://api.daydream.live/v1/streams/{stream_id}"
 
     payload = {
@@ -366,10 +397,8 @@ def update_prompt(stream_id: str, auth_key: str, prompt: str) -> None:
         "Content-Type": "application/json"
     }
 
-    response = requests.patch(url, json=payload, headers=headers)
-
-stream_id = os.getenv("DAYDREAM_STREAM_ID")
-auth_key = os.getenv("DAYDREAM_API_ID")
+    response = requests.patch(url, json=payload, headers=headers, timeout=10)
+    response.raise_for_status()
 
 if __name__ == "__main__":
     WeightedStreamClient().start()
