@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import threading
-import time
 from collections import deque
 from typing import Deque
 
@@ -14,9 +13,6 @@ from daydream_api import update_prompt_text
 from local_summarizer import LocalSummarizer
 from weighted_audio_stream import WeightedStreamClient
 
-load_dotenv(find_dotenv())
-stream_id = os.getenv("DAYDREAM_STREAM_ID")
-api_key = os.getenv("DAYDREAM_API_ID")
 
 class SLMSummaryBridge:
     def __init__(self, *, stream_id: str, api_key: str, interval: float = 8.0):
@@ -59,14 +55,17 @@ class SLMSummaryBridge:
 
 
 def main():
-    
+    load_dotenv(find_dotenv())
+    stream_id = os.getenv("DAYDREAM_STREAM_ID")
+    api_key = os.getenv("DAYDREAM_API_KEY")
+
     if not stream_id or not api_key:
         raise RuntimeError("DAYDREAM_STREAM_ID and DAYDREAM_API_KEY must be set.")
 
     bridge = SLMSummaryBridge(stream_id=stream_id, api_key=api_key)
     bridge.start()
 
-    client = WeightedStreamClient(on_transcript=bridge.ingest)
+    client = WeightedStreamClient(on_transcript=bridge.ingest, enable_daydream_updates=False)
     try:
         client.start()
     finally:
