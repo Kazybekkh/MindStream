@@ -399,6 +399,3 @@ def update_prompt(stream_id: str, auth_key: str, prompt: str) -> None:
 
     response = requests.patch(url, json=payload, headers=headers, timeout=10)
     response.raise_for_status()
-
-if __name__ == "__main__":
-    WeightedStreamClient().start()

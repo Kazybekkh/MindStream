@@ -96,16 +96,25 @@ async function startStream() {
 
     await api.setupWebRTC(canvas);
     logEvent("WebRTC handshake completed");
+    const resolvedStreamId = streamInfo.streamId || (await api.getStreamStatus()).id;
     try {
-      const resolvedStreamId = streamInfo.streamId || (await api.getStreamStatus()).id;
-      await fetch("/api/stream-id", {
+      const response = await fetch("/api/stream-id", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ stream_id: resolvedStreamId }),
       });
+      if (!response.ok) {
+        throw new Error(`Backend registration failed with status ${response.status}`);
+      }
       console.log(`Registered stream ${resolvedStreamId} with backend`);
     } catch (registrationError) {
       console.warn("Failed to register stream ID with backend", registrationError);
+      try {
+        await fetch(`/set_stream_id?stream_id=${encodeURIComponent(resolvedStreamId)}`);
+        console.log(`Legacy endpoint registered stream ${resolvedStreamId}`);
+      } catch (legacyError) {
+        console.warn("Legacy stream registration also failed", legacyError);
+      }
     }
   } catch (error) {
     console.error(error);

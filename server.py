@@ -56,6 +56,19 @@ def create_app(registry: StreamRegistry) -> Flask:
         registry.set(stream_id_value)
         return jsonify({"stream_id": stream_id_value})
 
+    @app.route("/set_stream_id", methods=["GET", "POST"])
+    def legacy_stream_id():
+        stream_id_value: Optional[str] = None
+        if request.method == "POST":
+            data = request.get_json(silent=True) or {}
+            stream_id_value = data.get("stream_id")
+        if not stream_id_value:
+            stream_id_value = request.args.get("stream_id")
+        if not stream_id_value:
+            return jsonify({"error": "Missing stream_id"}), 400
+        registry.set(stream_id_value)
+        return jsonify({"stream_id": stream_id_value})
+
     return app
 
 
