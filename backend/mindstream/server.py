@@ -4,9 +4,11 @@ import logging
 from threading import Lock, Thread
 from typing import Optional
 
+from pathlib import Path
+
 from flask import Flask, jsonify, request, send_from_directory
 
-from weighted_audio_stream import WeightedStreamClient
+from .audio_stream import WeightedStreamClient
 
 
 class StreamRegistry:
@@ -26,7 +28,9 @@ class StreamRegistry:
 
 
 def create_app(registry: StreamRegistry) -> Flask:
-    app = Flask(__name__, static_folder="frontend", static_url_path="")
+    project_root = Path(__file__).resolve().parents[2]
+    static_root = project_root / "frontend"
+    app = Flask(__name__, static_folder=str(static_root), static_url_path="")
 
     @app.route("/")
     def serve_index() -> str:

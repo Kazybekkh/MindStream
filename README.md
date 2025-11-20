@@ -1,52 +1,38 @@
 # Mindstream
 
-Mindstream is an interactive Livepeer Daydream controller that listens to your speech, extracts the dominant theme with a decaying relevance model, pushes new prompts to Livepeer in real time, and immutably logs each transition on Base Sepolia for Envio to index.
-## Demo 
-https://www.youtube.com/watch?v=R5AhDbXoXCo
+Mindstream listens to your speech, tracks the dominant themes, and steers Livepeer Daydream prompts in real time. The stack now focuses on the Python streaming/summary tooling and the Daydream console—on-chain contracts are archived.
 
-## What’s inside
-
-- Python utilities:
-  - `weighted_audio_stream.py` – streams mic audio to AssemblyAI, keeps a decaying keyword queue, and prints the most relevant subjects every five seconds.
-  - `daydream_prompt_bridge.py` – hooks the same queue into Livepeer Daydream, PATCHing prompts with the latest `(keyword, weight)` pairs.
-  - `facial_emotion_detector.py` – currently stubbed out to keep dependencies light.
-- `daydream_api.py` – helper for calling the Daydream REST endpoint.
-- `contracts` – `MindstreamThemeLogger.sol`, plus deployment docs for logging prompt transitions on Base Sepolia.
+## Repo layout
+- `backend/` – Python package (`backend.mindstream`) with the AssemblyAI listener, Daydream API helper, local summarizer, and Flask bridge. CLI entry points live in `backend/scripts/`.
+- `frontend/` – Static console for spinning up Daydream streams and registering the active stream id with the backend.
+- `docs/` – Hackathon notes and prior setup guides.
+- `archive/` – Legacy contracts and experimental scripts (not part of the current flow).
 
 ## Quick start
-
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r python-requirements.txt
+pip install -r backend/requirements.txt
 
-# run the keyword tracker
-python weighted_audio_stream.py
+# Stream mic audio, print keywords, and optionally push prompts to Daydream
+python -m backend.scripts.run_audio_stream
 
-# or stream keywords directly to Daydream
-python daydream_prompt_bridge.py
+# Use the local SLM summarizer to drive Daydream prompts
+python -m backend.scripts.run_slm_bridge
+
+# Serve the frontend + register stream ids with the backend listener
+python -m backend.scripts.run_server   # open http://localhost:8000
 ```
 
-## Environment configuration
+## Environment
+- `ASSEMBLYAI_API_KEY` – required for the audio stream client.
+- `DAYDREAM_API_KEY` / `DAYDREAM_STREAM_ID` – needed when sending prompts to Livepeer Daydream.
+- `SLM_MODEL_ID` – optional HF model id for the local summarizer (defaults to `sshleifer/distilbart-cnn-12-6`).
 
-Set the following environment variables before running the scripts:
+## How it works
+1) **Capture**: `backend.mindstream.audio_stream.WeightedStreamClient` streams mic audio to AssemblyAI and maintains a decaying keyword queue.  
+2) **Prompt updates**: the same client can push the latest summary to Daydream via `daydream_api.update_prompt_text`.  
+3) **Local summarizer (optional)**: `backend.mindstream.slm_bridge.SLMSummaryBridge` batches transcripts and sends concise prompts instead of raw keywords.  
+4) **Frontend**: `frontend/` spins up a Daydream stream and posts the stream id to the backend so audio-driven prompts know where to go.
 
-- `ASSEMBLYAI_API_KEY` – used by the weighted stream to mint STT tokens.
-- `DAYDREAM_API_KEY` and `DAYDREAM_STREAM_ID` – required by `daydream_prompt_bridge.py` / `daydream_api.py`.
-- `DAYDREAM_MODEL_ID`, `DAYDREAM_STYLE` (optional) – customize the generated prompt aesthetic.
-
-## Feature flow
-
-1. **Capture** – `weighted_audio_stream.py` captures audio locally, forwards it to AssemblyAI, and maintains a decaying relevance queue of keywords.
-2. **Prompting** – `daydream_prompt_bridge.py` converts the current keywords into the Daydream prompt format and PATCHes the live stream.
-3. **On-chain logging (optional)** – `contracts/MindstreamThemeLogger.sol` records prompt transitions so Envio HyperIndex can surface a historical timeline.
-
-## Testing & linting
-
-- Python utilities: `source .venv/bin/activate` then run `python weighted_audio_stream.py` or `python daydream_prompt_bridge.py`. (Facial emotion detection is currently disabled to keep dependencies lean.)
-
-## Next steps
-
-- Reintroduce the frontend/backend stacks once ready to ship a full-stack demo.
-- Build an Envio subgraph to hydrate history panels directly from `MindstreamThemeLogger`.
-- Expand the Daydream prompt bridge with richer style presets, motion controls, or Envio-powered context.
+Contracts for logging prompt transitions are no longer in use; the Solidity + deployment notes now live under `archive/contracts/`.

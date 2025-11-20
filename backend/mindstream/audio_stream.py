@@ -21,6 +21,9 @@ from urllib.parse import urlencode
 import pyaudio
 import websocket
 from dotenv import find_dotenv, load_dotenv
+import requests
+
+from .daydream_api import update_prompt_text
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -336,7 +339,11 @@ class WeightedStreamClient:
                         self.daydream_enabled = False
                     else:
                         try:
-                            update_prompt(stream_id, self.daydream_key, phrase or formatted)
+                            update_prompt_text(
+                                phrase or formatted,
+                                stream_id=stream_id,
+                                api_key=self.daydream_key,
+                            )
                         except requests.RequestException as exc:
                             print(f"[daydream] failed to update stream: {exc}")
             elif not snapshot and self.last_printed:
@@ -408,27 +415,6 @@ class WeightedStreamClient:
         if not words:
             return ""
         return " ".join(words).strip()
-
-def update_prompt(stream_id: str, auth_key: str, prompt: str) -> None:
-    if not stream_id:
-        raise ValueError("stream_id is required to update Daydream")
-    if not auth_key:
-        raise ValueError("Daydream API key missing")
-    url = f"https://api.daydream.live/v1/streams/{stream_id}"
-
-    payload = {
-        "params": {
-            # "prompt": [[keyword, weight] for keyword, weight in list(prompt.items())]
-            "prompt": prompt
-        }
-    }
-    headers = {
-        "Authorization": f"Bearer {auth_key}",
-        "Content-Type": "application/json"
-    }
-
-    response = requests.patch(url, json=payload, headers=headers, timeout=10)
-    response.raise_for_status()
 
 if __name__ == "__main__":
     WeightedStreamClient().start()

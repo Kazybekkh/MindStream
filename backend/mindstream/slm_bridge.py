@@ -9,9 +9,9 @@ from typing import Deque
 
 from dotenv import find_dotenv, load_dotenv
 
-from daydream_api import update_prompt_text
-from local_summarizer import LocalSummarizer
-from weighted_audio_stream import WeightedStreamClient
+from .daydream_api import update_prompt_text
+from .summarizer import LocalSummarizer
+from .audio_stream import WeightedStreamClient
 
 
 class SLMSummaryBridge:
