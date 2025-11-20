@@ -1,6 +1,10 @@
 # Mindstream
 
 Mindstream listens to your speech, tracks the dominant themes, and steers Livepeer Daydream prompts in real time. The stack now focuses on the Python streaming/summary tooling and the Daydream console—on-chain contracts are archived.
+This project was developed by Genki Asahi and Kazybek Khairulla. 
+
+Hackathon DEMO - [[https://www.youtube.com/watch?v=R5AhDbXoXCo]]
+
 
 ## Repo layout
 - `backend/` – Python package (`backend.mindstream`) with the AssemblyAI listener, Daydream API helper, local summarizer, and Flask bridge. CLI entry points live in `backend/scripts/`.
